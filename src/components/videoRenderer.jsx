@@ -3,100 +3,170 @@ import io from 'socket.io-client';
 
 const VideoRenderer = () => {
   const socket = useRef(null);
-  const peerConnection = useRef(null);
+  const peerConnections = useRef({});
   const videoRef = useRef(null);
-  const [employeeId,setEmployeeId]=useState('')
-  const [isStreaming,setIsStreaming]=useState(false)
+  const [employeeId, setEmployeeId] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
   const [videoStream, setVideoStream] = useState(null);
-
-  const toggleStreaming = () => {
-    setIsStreaming(!isStreaming);
-  };
-
+  const [time, setTime] = useState({ hours: 0, minutes: 0, seconds: 0 });
+  const timerRef = useRef(null);
 
   const config = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   };
 
-  const stopVideoCapture = () => {
-    if (videoStream) {
-      videoStream.getTracks().forEach(track => track.stop());
-      setVideoStream(null);
-    }
-  };
-  
+
   useEffect(() => {
     socket.current = io('http://192.168.6.28:4000');
-    socket.current.emit('register-employee', employeeId); 
+    socket.current.emit('register-employee', employeeId);
+
     if (isStreaming) {
       startVideoCapture();
+      startTimer();
     } else {
       stopVideoCapture();
     }
-
-    // return () => {
-    //   socket.current.disconnect();
-    //   stopVideoCapture();
-    // };
   }, [isStreaming]);
 
   const startVideoCapture = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       setVideoStream(stream);
       videoRef.current.srcObject = stream;
   
-      // Create peer connection
-      peerConnection.current = new RTCPeerConnection(config);
-      
-      // Add tracks to peer connection
-      stream.getTracks().forEach((track) => peerConnection.current.addTrack(track, stream));
+      socket.current.emit('stream-started', employeeId);
   
-      // Set up ICE candidate handler
-      peerConnection.current.onicecandidate = ({ candidate }) => {
-        if (candidate) {
-          socket.current.emit('ice-candidate', employeeId, candidate); // Send ICE candidate to server
-        }
-      };
-  
-      // Listen for 'answer' from admin
-      socket.current.on('answer', async (answer) => {
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
-      });
-  
-      // Listen for ICE candidates from server
-      socket.current.on('ice-candidate', async (candidate) => {
-        if (candidate) {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+      socket.current.on('answer', async (adminId, answer) => {
+        const pc = peerConnections.current[adminId];
+        if (pc) {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
         }
       });
   
-      // Create and send offer to admin
-      const offer = await peerConnection.current.createOffer();
-      await peerConnection.current.setLocalDescription(offer);
-      socket.current.emit('offer', employeeId, offer); // Send offer to the server, which forwards to admin
+      socket.current.on('ice-candidate', async (adminId, candidate) => {
+        const pc = peerConnections.current[adminId];
+        if (pc) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      });
+  
+      socket.current.on('new-admin', (adminId) => {
+        const pc = new RTCPeerConnection(config);
+        peerConnections.current[adminId] = pc;
+  
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+  
+        pc.onicecandidate = ({ candidate }) => {
+          if (candidate) {
+            socket.current.emit('ice-candidate', employeeId, adminId, candidate);
+          }
+        };
+  
+        createOffer(pc, adminId);
+      });
     } catch (error) {
       console.error('Error accessing webcam:', error);
     }
   };
   
+  const stopVideoCapture = () => {
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+      setVideoStream(null);
+      socket.current.emit('stream-paused', employeeId);
+    }
+    stopTimer();
+  };
   
+  
+  const createOffer = async (pc, adminId) => {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.current.emit('offer', employeeId, adminId, offer);
+  };
+
+  const startTimer = () => {
+    if (timerRef.current) return; 
+    timerRef.current = setInterval(() => {
+      setTime((prevTime) => {
+        const { hours, minutes, seconds } = prevTime;
+        const newSeconds = seconds + 1;
+        const newMinutes = newSeconds === 60 ? minutes + 1 : minutes;
+        const newHours = newMinutes === 60 ? hours + 1 : hours;
+        return {
+          hours: newHours,
+          minutes: newMinutes % 60,
+          seconds: newSeconds % 60,
+        };
+      });
+    }, 1000);
+  };
+
+  const stopTimer = () => {
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+  };
+
+  const resumeVideoCapture = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      setVideoStream(stream);
+      videoRef.current.srcObject = stream;
+      socket.current.emit('stream-resumed', employeeId);
+  
+      Object.values(peerConnections.current).forEach((pc) => {
+        const videoTrack = stream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(videoTrack);
+        } else {
+          stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        }
+      });
+    } catch (error) {
+      console.error('Error resuming video capture:', error);
+    }
+  };
+  
+  const formatTime = () => {
+    const { hours, minutes, seconds } = time;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  };
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+      <h2>Tracker</h2>
       <input
         type="text"
-        placeholder="Enter Employee ID (e.g., employee1)"
+        placeholder="Enter Employee ID (employee1)"
         onChange={(e) => setEmployeeId(e.target.value)}
         value={employeeId}
       />
-     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-      <h2>Stream Your Video</h2>
-      <button onClick={toggleStreaming} style={{ padding: '10px', borderRadius: '5px', cursor: 'pointer' }}>
-        {isStreaming ? 'Stop Streaming' : 'Start Streaming'}
-      </button>
-      <video ref={videoRef} autoPlay muted style={{ width: '100%', height: '400px', border: '1px solid gray', marginTop: '20px' }} />
-    </div>
+    <button
+  onClick={() => {
+    if (isStreaming) {
+      stopVideoCapture();
+    } else {
+      resumeVideoCapture();
+    }
+    setIsStreaming(!isStreaming);
+  }}
+  style={{
+    width: '50px',
+    height: '50px',
+    borderRadius: '50%',
+    cursor: 'pointer',
+    fontSize: '24px',
+  }}
+  disabled={!employeeId}
+>
+  {isStreaming ? '⏹' : '⏵'}
+</button>
+
+      <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '20px' }}>
+        {formatTime()}
+      </div>
+      <video ref={videoRef} autoPlay muted style={{ width: '100%', height: '300px', marginTop: '20px' }} />
     </div>
   );
 };
