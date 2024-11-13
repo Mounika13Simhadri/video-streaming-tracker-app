@@ -33,42 +33,39 @@ const VideoRenderer = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       setVideoStream(stream);
       videoRef.current.srcObject = stream;
-  
       socket.current.emit('stream-started', employeeId);
-  
       socket.current.on('answer', async (adminId, answer) => {
         const pc = peerConnections.current[adminId];
         if (pc) {
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
         }
       });
-  
+
       socket.current.on('ice-candidate', async (adminId, candidate) => {
         const pc = peerConnections.current[adminId];
         if (pc) {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         }
       });
-  
+
       socket.current.on('new-admin', (adminId) => {
         const pc = new RTCPeerConnection(config);
         peerConnections.current[adminId] = pc;
-  
+
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
-  
+
         pc.onicecandidate = ({ candidate }) => {
           if (candidate) {
             socket.current.emit('ice-candidate', employeeId, adminId, candidate);
           }
         };
-  
+
         createOffer(pc, adminId);
       });
     } catch (error) {
       console.error('Error accessing webcam:', error);
     }
   };
-  
   const stopVideoCapture = () => {
     if (videoStream) {
       videoStream.getTracks().forEach(track => track.stop());
@@ -77,8 +74,7 @@ const VideoRenderer = () => {
     }
     stopTimer();
   };
-  
-  
+
   const createOffer = async (pc, adminId) => {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -127,7 +123,7 @@ const VideoRenderer = () => {
       console.error('Error resuming video capture:', error);
     }
   };
-  
+
   const formatTime = () => {
     const { hours, minutes, seconds } = time;
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
@@ -142,7 +138,7 @@ const VideoRenderer = () => {
         onChange={(e) => setEmployeeId(e.target.value)}
         value={employeeId}
       />
-    <button
+          <button
   onClick={() => {
     if (isStreaming) {
       stopVideoCapture();
@@ -162,7 +158,6 @@ const VideoRenderer = () => {
 >
   {isStreaming ? '⏹' : '⏵'}
 </button>
-
       <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '20px' }}>
         {formatTime()}
       </div>
