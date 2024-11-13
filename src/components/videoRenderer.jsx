@@ -12,9 +12,15 @@ const VideoRenderer = () => {
   const timerRef = useRef(null);
 
   const config = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      {
+        urls: 'turn:your-turn-server-url',
+        username: 'your-username',
+        credential: 'your-credential',
+      },
+    ],
   };
-
 
   useEffect(() => {
     socket.current = io('https://sp6xbxfq-4000.inc1.devtunnels.ms/');
