@@ -17,7 +17,7 @@ const VideoRenderer = () => {
 
 
   useEffect(() => {
-    socket.current = io('https://qx993sw3-4000.inc1.devtunnels.ms/');
+    socket.current = io('https://sp6xbxfq-4000.inc1.devtunnels.ms/');
     socket.current.emit('register-employee', employeeId);
 
     if (isStreaming) {
