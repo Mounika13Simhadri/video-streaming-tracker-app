@@ -10,14 +10,15 @@ const VideoRenderer = () => {
   const [videoStream, setVideoStream] = useState(null);
   const [time, setTime] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const timerRef = useRef(null);
+  const [captureType, setCaptureType] = useState('screen'); 
 
   const config = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
   };
 
-
   useEffect(() => {
-    socket.current = io('https://sp6xbxfq-4000.inc1.devtunnels.ms/');
+
+    socket.current = io('https://qx993sw3-4000.inc1.devtunnels.ms/' );
     socket.current.emit('register-employee', employeeId);
 
     if (isStreaming) {
@@ -26,11 +27,66 @@ const VideoRenderer = () => {
     } else {
       stopVideoCapture();
     }
-  }, [isStreaming]);
+
+    return () => {
+      if (socket.current) {
+        socket.current.disconnect();
+      }
+    };
+  }, [isStreaming, employeeId]);
+
+  const startStream = async (captureType) => {
+    let stream;
+    try {
+      if (captureType === 'screen') {
+        const sources = await window.electron.getScreenStream();
+        if (!sources.length) {
+          console.error('No screen sources available.');
+          return;
+        }
+        const source = sources[0];
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: source.id,
+            },
+          },
+        });
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+    } catch (error) {
+      console.error('Error accessing media devices:', error);
+    }
+    return stream;
+  };
+  const switchStream = async (newCaptureType) => {
+    setCaptureType(newCaptureType); 
+    const newStream = await startStream(newCaptureType);
+    if (newStream) {
+      setVideoStream(newStream);
+      videoRef.current.srcObject = newStream;
+      socket.current.emit('stream-started', employeeId);
+  
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      Object.values(peerConnections.current).forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(newVideoTrack);
+        } else {
+          newStream.getTracks().forEach(track => pc.addTrack(track, newStream));
+        }
+      });
+    }
+  };
+  
 
   const startVideoCapture = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    try{
+    const stream = await startStream(captureType);
+    if (stream) {
       setVideoStream(stream);
       videoRef.current.srcObject = stream;
       socket.current.emit('stream-started', employeeId);
@@ -48,10 +104,14 @@ const VideoRenderer = () => {
         }
       });
 
+      socket.current.on('switch-stream', async (streamType) => {
+        console.log(`Switching to ${streamType}`);
+        await switchStream(streamType);
+      });
+
       socket.current.on('new-admin', (adminId) => {
         const pc = new RTCPeerConnection(config);
         peerConnections.current[adminId] = pc;
-
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
         pc.onicecandidate = ({ candidate }) => {
@@ -62,10 +122,14 @@ const VideoRenderer = () => {
 
         createOffer(pc, adminId);
       });
-    } catch (error) {
+    }
+  }
+    catch (error) {
       console.error('Error accessing webcam:', error);
+     
     }
   };
+
   const stopVideoCapture = () => {
     if (videoStream) {
       videoStream.getTracks().forEach(track => track.stop());
@@ -76,13 +140,17 @@ const VideoRenderer = () => {
   };
 
   const createOffer = async (pc, adminId) => {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    socket.current.emit('offer', employeeId, adminId, offer);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.current.emit('offer', employeeId, adminId, offer);
+    } catch (error) {
+      console.error('Error creating or sending WebRTC offer:', error);
+    }
   };
 
   const startTimer = () => {
-    if (timerRef.current) return; 
+    if (timerRef.current) return;
     timerRef.current = setInterval(() => {
       setTime((prevTime) => {
         const { hours, minutes, seconds } = prevTime;
@@ -104,12 +172,12 @@ const VideoRenderer = () => {
   };
 
   const resumeVideoCapture = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = await startStream(captureType);
+    if (stream) {
       setVideoStream(stream);
       videoRef.current.srcObject = stream;
       socket.current.emit('stream-resumed', employeeId);
-  
+
       Object.values(peerConnections.current).forEach((pc) => {
         const videoTrack = stream.getVideoTracks()[0];
         const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
@@ -119,8 +187,6 @@ const VideoRenderer = () => {
           stream.getTracks().forEach(track => pc.addTrack(track, stream));
         }
       });
-    } catch (error) {
-      console.error('Error resuming video capture:', error);
     }
   };
 
@@ -138,30 +204,30 @@ const VideoRenderer = () => {
         onChange={(e) => setEmployeeId(e.target.value)}
         value={employeeId}
       />
-          <button
-  onClick={() => {
-    if (isStreaming) {
-      stopVideoCapture();
-    } else {
-      resumeVideoCapture();
-    }
-    setIsStreaming(!isStreaming);
-  }}
-  style={{
-    width: '50px',
-    height: '50px',
-    borderRadius: '50%',
-    cursor: 'pointer',
-    fontSize: '24px',
-  }}
-  disabled={!employeeId}
->
-  {isStreaming ? '⏹' : '⏵'}
-</button>
+      <button
+        onClick={() => {
+          if (isStreaming) {
+            stopVideoCapture();
+          } else {
+            resumeVideoCapture();
+          }
+          setIsStreaming(!isStreaming);
+        }}
+        style={{
+          width: '50px',
+          height: '50px',
+          borderRadius: '50%',
+          cursor: 'pointer',
+          fontSize: '24px',
+        }}
+        disabled={!employeeId}
+      >
+        {isStreaming ? '⏹' : '⏵'}
+      </button>
       <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '20px' }}>
         {formatTime()}
       </div>
-      <video ref={videoRef} autoPlay muted style={{ width: '100%', height: '300px', marginTop: '20px' }} />
+      {/* <video ref={videoRef} autoPlay muted style={{ width: '100%', height: '300px', marginTop: '20px' }} /> */}
     </div>
   );
 };
