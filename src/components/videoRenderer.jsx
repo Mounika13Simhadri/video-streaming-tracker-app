@@ -4,7 +4,7 @@ import io from 'socket.io-client';
 const VideoRenderer = () => {
   const socket = useRef(null);
   const peerConnections = useRef({});
-  const videoRef = useRef(null);
+  // const videoRef = useRef(null);
   const [employeeId, setEmployeeId] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [videoStream, setVideoStream] = useState(null);
@@ -67,7 +67,7 @@ const VideoRenderer = () => {
     const newStream = await startStream(newCaptureType);
     if (newStream) {
       setVideoStream(newStream);
-      videoRef.current.srcObject = newStream;
+      // videoRef.current.srcObject = newStream;
       socket.current.emit('stream-started', employeeId);
   
       const newVideoTrack = newStream.getVideoTracks()[0];
@@ -88,7 +88,7 @@ const VideoRenderer = () => {
     const stream = await startStream(captureType);
     if (stream) {
       setVideoStream(stream);
-      videoRef.current.srcObject = stream;
+    //  videoRef.current.srcObject = stream;
       socket.current.emit('stream-started', employeeId);
       socket.current.on('answer', async (adminId, answer) => {
         const pc = peerConnections.current[adminId];
@@ -175,7 +175,7 @@ const VideoRenderer = () => {
     const stream = await startStream(captureType);
     if (stream) {
       setVideoStream(stream);
-      videoRef.current.srcObject = stream;
+      // videoRef.current.srcObject = stream;
       socket.current.emit('stream-resumed', employeeId);
 
       Object.values(peerConnections.current).forEach((pc) => {
@@ -227,6 +227,7 @@ const VideoRenderer = () => {
       <div style={{ fontSize: '24px', fontWeight: 'bold', marginTop: '20px' }}>
         {formatTime()}
       </div>
+      <h3>Streaming {captureType}</h3>
       {/* <video ref={videoRef} autoPlay muted style={{ width: '100%', height: '300px', marginTop: '20px' }} /> */}
     </div>
   );
